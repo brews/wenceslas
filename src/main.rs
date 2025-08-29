@@ -1,3 +1,4 @@
+mod hash;
 mod storage;
 
 use crate::storage::{HashStorage, load_storage};
@@ -119,7 +120,7 @@ async fn post_verify(
     info!("found record for {email}");
 
     // Verify password against stored hash.
-    let decision = match wenceslas::verify_password(user_hash, password) {
+    let decision = match hash::verify_password(user_hash, password) {
         true => VerifyDecision::Verified,
         false => VerifyDecision::Unverified,
     };

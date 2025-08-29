@@ -1,4 +1,4 @@
-//! Core logic for the application.
+//! Application's password-hashing logic.
 
 use base64::{Engine, prelude::BASE64_STANDARD};
 use hmac::{Hmac, Mac};
