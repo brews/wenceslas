@@ -7,7 +7,7 @@ use std::{collections::HashMap, io::Read};
 
 use crate::hash::WordpressHash;
 
-/// In-memory storage for user hashes indexed on user email
+/// In-memory storage for password hashes indexed on user email
 #[derive(Deserialize)]
 pub struct HashStorage {
     backend: HashMap<String, WordpressHash>,
@@ -60,7 +60,7 @@ impl<'de> Deserialize<'de> for WordpressHash {
     {
         let s = String::deserialize(deserializer)?; // Deserialize the input as a String
 
-        // Let core hashing logic determine how this is handled, but wrap any errors so this returns proper deserialization errors.
+        // Let core hashing logic determine how string is parsed, but wrap any errors so this returns proper deserialization errors.
         WordpressHash::try_from(s).map_err(D::Error::custom)
     }
 }

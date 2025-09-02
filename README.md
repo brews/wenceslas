@@ -9,14 +9,15 @@ holding emails and Wordpress-hashed passwords into memory on startup.
 
 The server can only verify requests against hashes from newer Wordpress-flavored
 bcrypt - the default in Wordpress 6.8 - and earlier Wordpress versions using
-phpass. These hashes have a `$P$` or `$wp` prefix.
+phpass. These hashes have a `$P$` or `$wp` prefix. The server will fail on
+startup if the CSV file has hashes with unknown prefixes.
 
 The CSV file must be UTF-8 encoded with a header and columns giving `user_email`
 and `user_pass`. Only these columns are loaded into memory. No duplicate user
 emails are allowed and will cause the server to fail on startup.
 
 > [!WARNING]
-> This application does not have adequate security to run alone in a production environment.
+> This application does not have features to securely run alone in a production environment.
 
 ## Example
 

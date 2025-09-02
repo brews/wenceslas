@@ -8,6 +8,8 @@ use serde::Deserialize;
 use sha2::Sha384;
 
 /// An unverified password.
+///
+/// Don't print, debug, or access directly except to get a verification decision from 'WordpressHash::verify'.
 #[derive(Deserialize)]
 pub struct UnverifiedPassword(String);
 
@@ -19,6 +21,8 @@ impl UnverifiedPassword {
 }
 
 /// A Wordpress password hash, either a bcrypt variant or from PHPass.
+///
+/// Use `WordpressHash::verify` to verify `UnverifiedPassword`s.
 #[derive(Debug, PartialEq)]
 pub enum WordpressHash {
     /// A Wordpress-flavored bcrypt hash.
