@@ -2,18 +2,20 @@
 
 use anyhow::{Context, Result, bail};
 use log::info;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, de::Error};
 use std::{collections::HashMap, io::Read};
+
+use crate::hash::WordpressHash;
 
 /// In-memory storage for user hashes indexed on user email
 #[derive(Deserialize)]
 pub struct HashStorage {
-    backend: HashMap<String, String>,
+    backend: HashMap<String, WordpressHash>,
 }
 
-/// In-memory storage for securely hashed user credentials.
 impl HashStorage {
-    pub fn read_user_hash(&self, user_email: &String) -> Option<&String> {
+    /// Get password hash associated with a user's email.
+    pub fn read_hashed_password(&self, user_email: &String) -> Option<&WordpressHash> {
         self.backend.get(user_email)
     }
 }
@@ -22,7 +24,7 @@ impl HashStorage {
 pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
     let mut reader = csv::Reader::from_reader(reader);
 
-    let mut data_map: HashMap<String, String> = HashMap::new();
+    let mut data_map: HashMap<String, WordpressHash> = HashMap::new();
     let mut n = 0;
 
     for result in reader.deserialize() {
@@ -48,7 +50,19 @@ pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
 #[derive(Deserialize)]
 struct UserRecord {
     user_email: String,
-    user_pass: String,
+    user_pass: WordpressHash,
+}
+
+impl<'de> Deserialize<'de> for WordpressHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?; // Deserialize the input as a String
+
+        // Let core hashing logic determine how this is handled, but wrap any errors so this returns proper deserialization errors.
+        WordpressHash::try_from(s).map_err(D::Error::custom)
+    }
 }
 
 #[cfg(test)]
@@ -58,15 +72,14 @@ mod tests {
 
     #[test]
     fn test_load_storage_basic() {
-        let file_str =
-            "user_email,user_pass\nemail@example.com,AFakeHash\nemail2@foobar.com,AnotherFakeHash";
+        let file_str = "user_email,user_pass\nemail@example.com,$P$AFakeHash\nemail2@foobar.com,$wp$AnotherFakeHash";
         let cursor = Cursor::new(file_str);
 
         let store = load_storage(cursor).expect("File didn't load");
 
         assert_eq!(
-            store.read_user_hash(&String::from("email@example.com")),
-            Some(&String::from("AFakeHash"))
+            store.read_hashed_password(&String::from("email@example.com")),
+            Some(&WordpressHash::try_from(String::from("$P$AFakeHash")).unwrap())
         );
     }
 
@@ -96,6 +109,17 @@ mod tests {
     fn test_storage_needs_user_email_column() {
         // Storage file needs user_email column or load_storage should panic.
         let file_str = "user_email,not_user_pass\nemail@example.com,AFakeHash\nemail@example.com,AnotherFakeHash";
+        let cursor = Cursor::new(file_str);
+
+        let _ = load_storage(cursor).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_storage_needs_recognized_hashes() {
+        // Storage file needs to have recognized hash types or reading it should cause panic.
+        // Note the $BADHASHPREFIX$ entry is a bad hash that shouldn't be recognized.
+        let file_str = "user_email,user_pass\nemail@example.com,$BADHASHPREFIX$AFakeHash\nemail2@foobar.com,$wp$AnotherFakeHash";
         let cursor = Cursor::new(file_str);
 
         let _ = load_storage(cursor).unwrap();

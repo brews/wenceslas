@@ -1,22 +1,56 @@
-//! Application's password-hashing logic.
+//! Password verifying and hashing logic.
 
 use base64::{Engine, prelude::BASE64_STANDARD};
 use hmac::{Hmac, Mac};
 use log::error;
 use phpass::PhPass;
+use serde::Deserialize;
 use sha2::Sha384;
 
-/// Verify password against stored hash.
-pub fn verify_password(hash: &str, password: &[u8]) -> bool {
-    // Logic from wordpress v6.8.2 https://github.com/WordPress/WordPress/blob/7a06b8b559b6979e66c3d52307c29fc036d262b4/wp-includes/pluggable.php#L2736
-    //
-    // Figure out what kind of hash this is.
-    let prefix = &hash[..3];
-    log::debug!("verifying with prefix {prefix}");
-    match prefix {
-        "$wp" => wp_verify(hash, password),
-        "$P$" => p_verify(hash, password),
-        _ => false,
+/// An unverified password.
+#[derive(Deserialize)]
+pub struct UnverifiedPassword(String);
+
+impl UnverifiedPassword {
+    /// Return a byte slice of the password.
+    fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+/// A Wordpress password hash, either a bcrypt variant or from PHPass.
+#[derive(Debug, PartialEq)]
+pub enum WordpressHash {
+    /// A Wordpress-flavored bcrypt hash.
+    Bcrypt(String),
+    /// A PHPass hash.
+    Phpass(String),
+}
+impl WordpressHash {
+    /// Verify password with hash, consuming the password.
+    pub fn verify(&self, pwd: UnverifiedPassword) -> bool {
+        let password = pwd.as_bytes();
+        match self {
+            WordpressHash::Bcrypt(h) => wp_verify(h, password),
+            WordpressHash::Phpass(h) => p_verify(h, password),
+        }
+    }
+}
+
+impl TryFrom<String> for WordpressHash {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Logic from wordpress v6.8.2 https://github.com/WordPress/WordPress/blob/7a06b8b559b6979e66c3d52307c29fc036d262b4/wp-includes/pluggable.php#L2736
+        // Figure out what kind of hash this is.
+        let prefix = &value[..3];
+        log::debug!("verifying with prefix {prefix}");
+        // TODO: Have this return a more descriptive/parsable error.
+        match prefix {
+            "$wp" => Ok(WordpressHash::Bcrypt(value)),
+            "$P$" => Ok(WordpressHash::Phpass(value)),
+            _ => Err("Could not identify password hash type"),
+        }
     }
 }
 
@@ -68,77 +102,88 @@ fn p_verify(hash: &str, password: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    /// Test WpHash::try_from() makes string correct variant.
     #[test]
-    fn test_verify_password_unhashed() {
-        // Test the case when a "hash" is not actually a hash but a raw password. This case should fail verification.
-        assert!(
-            !verify_password("AnUnhashedPassword", "AnUnhashedPassword".as_bytes()),
-            "A hash that is actually an un-unhashed password should not pass verification"
-        )
+    fn test_wphash_tryfrom_string() {
+        let victim_bcrypt = String::from("$wp$foobar");
+        assert_eq!(
+            WordpressHash::Bcrypt(victim_bcrypt.clone()),
+            WordpressHash::try_from(victim_bcrypt).unwrap()
+        );
+        let victim_phpass = String::from("$P$foobar");
+        assert_eq!(
+            WordpressHash::Phpass(victim_phpass.clone()),
+            WordpressHash::try_from(victim_phpass).unwrap()
+        );
     }
 
+    /// Test WpHash::try_from() errors on unknown hash prefixes.
     #[test]
-    fn test_verify_password_fails_unknown_hash() {
-        // Test that some unknown "hash" fails verification.
-        assert!(
-            !verify_password(
-                "$what$is$this$hash$2bajB//ff34WOg4vN9OI/",
-                "aBadPassword".as_bytes()
-            ),
-            "Password verified against an unknown hash when it should have failed"
-        )
+    #[should_panic]
+    fn test_wphash_tryfrom_string_badprefix_error() {
+        let _ = WordpressHash::try_from(String::from("$foobar$ninini")).unwrap();
+    }
+
+    /// Test WpHash::try_from() errors when there is no hash prefix (or if hash is actually a raw password).
+    #[test]
+    #[should_panic]
+    fn test_wphash_tryfrom_string_rawpassword_error() {
+        let _ = WordpressHash::try_from(String::from("foobar")).unwrap();
     }
 
     #[test]
     fn test_verify_password_phpass() {
+        // A good password should pass verification with PHPass hash.
         // Test case from phpass library (https://github.com/clausehound/phpass/blob/8c8f60467ad7510167d8bf9068f057fd9f22da0e/src/lib.rs).
-        assert!(
-            verify_password(
-                "$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/",
-                "finalFormSkeleton".as_bytes()
-            ),
-            "Failed to verify phpass hash"
-        )
+        let hash =
+            WordpressHash::try_from(String::from("$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/")).unwrap();
+        let pw = UnverifiedPassword(String::from("finalFormSkeleton"));
+        assert!(hash.verify(pw), "Failed to verify phpass hash")
     }
 
     #[test]
     fn test_verify_password_phpass_fails() {
         // Test that bad password fails verification against a phpass hash.
+        let hash =
+            WordpressHash::try_from(String::from("$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/")).unwrap();
+        let pw = UnverifiedPassword(String::from("wrongPassword"));
         assert!(
-            !verify_password(
-                "$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/",
-                "wrongPassword".as_bytes()
-            ),
-            "Password verified that should have failed"
+            !hash.verify(pw),
+            "Password verified successfully when it should have failed"
         )
     }
 
     #[test]
     fn test_verify_password_phpass2() {
+        // Another good password should pass verification with PHPass hash.
         // Test case from phpass context test case in passlib (https://foss.heptapod.net/python-libs/passlib/-/blob/058b04309b762098c3a1f3bb026e6647caad085f/passlib/tests/test_apps.py).
-        assert!(
-            verify_password("$P$8Ja1vJsKa5qyy/b3mCJGXM7GyBnt6..", "test".as_bytes()),
-            "Failed to verify phpass hash"
-        )
+        let hash =
+            WordpressHash::try_from(String::from("$P$8Ja1vJsKa5qyy/b3mCJGXM7GyBnt6..")).unwrap();
+        let pw = UnverifiedPassword(String::from("test"));
+        assert!(hash.verify(pw), "Failed to verify phpass hash")
     }
 
     #[test]
     fn test_verify_password_phpass3() {
+        // Tests a password verifies in check against PHPass hash created using non-default 7 rounds.
         // Phpass test case using hash generated with with 7 rounds at https://asecuritysite.com/hash/phpass.
-        assert!(
-            verify_password("$P$5ZDzPE45Ci.QxPaPz.03z6TYbakcSQ0", "password".as_bytes()),
-            "Failed to verify phpass hash"
-        )
+        let hash =
+            WordpressHash::try_from(String::from("$P$5ZDzPE45Ci.QxPaPz.03z6TYbakcSQ0")).unwrap();
+        let pw = UnverifiedPassword(String::from("password"));
+        assert!(hash.verify(pw), "Failed to verify phpass hash")
     }
 
     #[test]
     fn test_verify_password_wp() {
+        // Test good password passes verification against a Wordpress-flavored bcrypt hash.
         // Wordpress-style bcrypt hash created by a Wordpress deployment
+        let hash = WordpressHash::try_from(String::from(
+            "$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q",
+        ))
+        .unwrap();
+        let pw = UnverifiedPassword(String::from("Test123Now!"));
         assert!(
-            verify_password(
-                "$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q",
-                "Test123Now!".as_bytes()
-            ),
+            hash.verify(pw),
             "Failed to verify Wordpress-style bcrypt hash"
         )
     }
@@ -146,11 +191,13 @@ mod tests {
     #[test]
     fn test_verify_password_wp_fails() {
         // Test bad password fails verification with Wordpress-style bcrypt hash
+        let hash = WordpressHash::try_from(String::from(
+            "$wp$2y$10$IlOpB3j5X32cWxWOG1b0YOGoRB2MeoHZrL7GDEVQJncNj47ib.vr2",
+        ))
+        .unwrap();
+        let pw = UnverifiedPassword(String::from("thisPasswordBetterFail"));
         assert!(
-            !verify_password(
-                "$wp$2y$10$IlOpB3j5X32cWxWOG1b0YOGoRB2MeoHZrL7GDEVQJncNj47ib.vr2",
-                "thisPasswordBetterFail".as_bytes()
-            ),
+            !hash.verify(pw),
             "Password passed verification when it should have failed"
         )
     }

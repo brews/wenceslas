@@ -1,7 +1,7 @@
 mod hash;
 mod storage;
 
-use crate::storage::{HashStorage, load_storage};
+use crate::{hash::UnverifiedPassword, storage::HashStorage};
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
@@ -22,7 +22,7 @@ use tracing_subscriber::EnvFilter;
 #[derive(Deserialize)]
 struct VerifyRequest {
     email: String,
-    password: String,
+    password: UnverifiedPassword,
 }
 
 struct AppState {
@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
     debug!("loading storage");
     let file = File::open(&csv_path)?;
     // Store in Arc so data isn't copied on every request, only a pointer is copied.
-    let store = load_storage(file)?;
+    let store = storage::load_storage(file)?;
     info!("storage loaded from {csv_path}");
 
     // TODO: Consider breaking appstate in two, as each member only needed in one place.
@@ -99,15 +99,14 @@ async fn main() -> Result<()> {
 
 async fn post_verify(
     State(appstate): State<Arc<AppState>>,
-    Json(payload): Json<VerifyRequest>,
+    Json(request): Json<VerifyRequest>,
 ) -> Result<VerifyDecision, StatusCode> {
-    let email: String = payload.email;
-    let password: &[u8] = payload.password.as_bytes();
+    let email: String = request.email;
     info!("received request verify {email}");
 
     // Find hash in storage matching user email.
-    let hash_result = appstate.store.read_user_hash(&email);
-    let user_hash = match hash_result {
+    let hash_result = appstate.store.read_hashed_password(&email);
+    let hashed_password = match hash_result {
         Some(r) => r,
         None => {
             debug!("no records found for {email}");
@@ -120,7 +119,7 @@ async fn post_verify(
     info!("found record for {email}");
 
     // Verify password against stored hash.
-    let decision = match hash::verify_password(user_hash, password) {
+    let decision = match hashed_password.verify(request.password) {
         true => VerifyDecision::Verified,
         false => VerifyDecision::Unverified,
     };
