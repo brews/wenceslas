@@ -65,7 +65,6 @@ async fn main() -> Result<()> {
     let host = std::env::var("HOST").expect("required HOST environment variable is not set");
     let port = std::env::var("PORT").expect("required PORT environment variable is not set");
     let apikey: Option<String> = std::env::var("APIKEY").ok();
-    // TODO: Log INFO saying when apikey is set on startup.
     let server_url = format!("{host}:{port}");
 
     debug!("loading storage");
@@ -74,8 +73,12 @@ async fn main() -> Result<()> {
     let store = storage::load_storage(file)?;
     info!("storage loaded from {csv_path}");
 
+    if apikey.is_some() {
+        info!("found apikey, enabling auth check for requests");
+    } else {
+        info!("no apikey found, disabling auth check for requests");
+    }
     // TODO: Consider breaking appstate in two, as each member only needed in one place.
-
     let appstate = Arc::new(AppState { store, apikey });
 
     let app = Router::new()

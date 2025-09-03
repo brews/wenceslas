@@ -48,7 +48,6 @@ impl TryFrom<String> for WordpressHash {
         // Logic from wordpress v6.8.2 https://github.com/WordPress/WordPress/blob/7a06b8b559b6979e66c3d52307c29fc036d262b4/wp-includes/pluggable.php#L2736
         // Figure out what kind of hash this is.
         let prefix = &value[..3];
-        log::debug!("verifying with prefix {prefix}");
         // TODO: Have this return a more descriptive/parsable error.
         match prefix {
             "$wp" => Ok(WordpressHash::Bcrypt(value)),
