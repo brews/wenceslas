@@ -206,6 +206,32 @@ mod tests {
         )
     }
 
+    /// Test that verify_password gracefully handles a bad hash with a good $wp prefix
+    #[test]
+    fn test_verify_password_wp_graceful_bad_hash_good_prefix() {
+        let hash =
+            WordpressHash::try_from(String::from("$wpWxWOG1b0YOGoRB2MeoHZrL7GDEVQJncNj47ib.vr2"))
+                .unwrap();
+        let pw = UnverifiedPassword(String::from("thisPasswordBetterFail"));
+        assert!(
+            !hash.verify(pw),
+            "Password passed verification when it should have failed"
+        )
+    }
+
+    /// Test that verify_password gracefully handles a bad hash with a good $P$ prefix
+    #[test]
+    fn test_verify_password_p_graceful_bad_hash_good_prefix() {
+        let hash =
+            WordpressHash::try_from(String::from("$P$WxWOG1b0YOGoRB2MeoHZrL7GDEVQJncNj47ib.vr2"))
+                .unwrap();
+        let pw = UnverifiedPassword(String::from("thisPasswordALSOBetterFail"));
+        assert!(
+            !hash.verify(pw),
+            "Password passed verification when it should have failed"
+        )
+    }
+
     #[test]
     fn test_p_verify() {
         // Test case from phpass library (https://github.com/clausehound/phpass/blob/8c8f60467ad7510167d8bf9068f057fd9f22da0e/src/lib.rs).
