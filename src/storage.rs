@@ -5,18 +5,16 @@ use log::info;
 use serde::{Deserialize, Deserializer, de::Error};
 use std::{collections::HashMap, io::Read};
 
-use crate::hash::WordpressHash;
+use crate::core::{HashReader, UserEmail, WordpressHash};
 
 /// In-memory storage for password hashes indexed on user email
-#[derive(Deserialize)]
 pub struct HashStorage {
-    backend: HashMap<String, WordpressHash>,
+    backend: HashMap<UserEmail, WordpressHash>,
 }
 
-impl HashStorage {
-    /// Get password hash associated with a user's email.
-    pub fn read_hashed_password(&self, user_email: &String) -> Option<&WordpressHash> {
-        self.backend.get(user_email)
+impl HashReader for HashStorage {
+    fn read_hash(&self, email: &UserEmail) -> Option<&WordpressHash> {
+        self.backend.get(email)
     }
 }
 
@@ -24,7 +22,7 @@ impl HashStorage {
 pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
     let mut reader = csv::Reader::from_reader(reader);
 
-    let mut data_map: HashMap<String, WordpressHash> = HashMap::new();
+    let mut data_map: HashMap<UserEmail, WordpressHash> = HashMap::new();
     let mut n = 0;
 
     for result in reader.deserialize() {
@@ -49,7 +47,7 @@ pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
 /// Stored record for login credentials of a single user.
 #[derive(Deserialize)]
 struct UserRecord {
-    user_email: String,
+    user_email: UserEmail,
     user_pass: WordpressHash,
 }
 
@@ -78,7 +76,7 @@ mod tests {
         let store = load_storage(cursor).expect("File didn't load");
 
         assert_eq!(
-            store.read_hashed_password(&String::from("email@example.com")),
+            store.read_hash(&UserEmail::new("email@example.com")),
             Some(&WordpressHash::try_from(String::from("$P$AFakeHash")).unwrap())
         );
     }

@@ -1,7 +1,10 @@
-mod hash;
+mod core;
 mod storage;
 
-use crate::{hash::UnverifiedPassword, storage::HashStorage};
+use crate::{
+    core::{UnverifiedPassword, UserEmail, VerifyError},
+    storage::HashStorage,
+};
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
@@ -11,6 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
+use log::warn;
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
@@ -19,9 +23,18 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 
+// TODO: Move web logic to its own module.
+// TODO: Improve web logic test coverage.
+// TODO: Improve ERROR logging, especially w.r.t. `anyhow`.
+// TODO: Make number of workers/threads configurable.
+// TODO: Make timeout configurable.
+// TODO: Structured logging. Request IDs.
+// TODO: Formalize fuzz testing, maybe property testing
+// TODO: Basic benchmarks.
+
 #[derive(Deserialize)]
 struct VerifyRequest {
-    email: String,
+    email: UserEmail,
     password: UnverifiedPassword,
 }
 
@@ -104,30 +117,30 @@ async fn post_verify(
     State(appstate): State<Arc<AppState>>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<VerifyDecision, StatusCode> {
-    let email: String = request.email;
-    info!("received request verify {email}");
-
-    // Find hash in storage matching user email.
-    let hash_result = appstate.store.read_hashed_password(&email);
-    let hashed_password = match hash_result {
-        Some(r) => r,
-        None => {
-            debug!("no records found for {email}");
-            let decision = VerifyDecision::Unverified;
-            info!("Decision for {email} is {decision:?}");
-            return Ok(decision);
+    info!("received request verify {:?}", request.email);
+    let verify_result = core::verify(&request.email, request.password, &appstate.store);
+    // Parse verification results, log errors, respond to request with with decision.
+    let decision = match verify_result {
+        Ok(_) => VerifyDecision::Verified,
+        Err(VerifyError::UnknownEmail) => {
+            info!("no records found for {:?}", request.email);
+            VerifyDecision::Unverified
+        }
+        Err(VerifyError::Password) => {
+            info!("could not verify password for {:?}", request.email);
+            VerifyDecision::Unverified
+        }
+        Err(VerifyError::Algorithm(e)) => {
+            // Warn because recovered from error but might be an issue with stored hash or app bug.
+            warn!(
+                "encountered error verifying password for {:?}: {e}",
+                request.email
+            );
+            VerifyDecision::Unverified
         }
     };
-    debug!("read record from storage");
-    info!("found record for {email}");
 
-    // Verify password against stored hash.
-    let decision = match hashed_password.verify(request.password) {
-        true => VerifyDecision::Verified,
-        false => VerifyDecision::Unverified,
-    };
-    info!("Decision for {email} is {decision:?}");
-
+    info!("decision for {:?} is {decision:?}", request.email);
     Ok(decision)
 }
 
