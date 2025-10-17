@@ -1,8 +1,10 @@
+mod config;
 mod core;
 mod service;
 mod storage;
 mod web;
 
+use crate::config::Config;
 use crate::service::Service;
 use crate::web::HttpServer;
 use anyhow::Result;
@@ -10,6 +12,7 @@ use std::{fs::File, sync::Arc};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 
+// TODO: Need type for Config.apikey so can't log accidentally.
 // TODO: Improve ERROR logging, especially w.r.t. `anyhow`.
 // TODO: Make number of workers/threads configurable.
 // TODO: Structured logging. Request IDs.
@@ -26,27 +29,22 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
     info!("starting server");
 
-    // Read and parse settings.
-    let csv_path =
-        std::env::var("CSV_PATH").expect("required CSV_PATH environment variable is not set");
-    let host = std::env::var("HOST").expect("required HOST environment variable is not set");
-    let port = std::env::var("PORT").expect("required PORT environment variable is not set");
-    let apikey: Arc<Option<String>> = Arc::new(std::env::var("APIKEY").ok());
+    let config = Config::load();
 
     debug!("loading storage");
-    let file = File::open(&csv_path)?;
-    // Store in Arc so data isn't copied on every request, only a pointer is copied.
+    let file = File::open(&config.csv_path)?;
     let store = storage::load_storage(file)?;
-    info!("storage loaded from {csv_path}");
+    info!("storage loaded from {}", config.csv_path);
 
-    if apikey.is_some() {
+    if config.apikey.is_some() {
         info!("found apikey, enabling auth check for requests");
     } else {
         info!("no apikey found, disabling auth check for requests");
     }
 
     let app_service = Arc::new(Service::new(store));
+    let apikey = Arc::new(config.apikey);
 
-    let server = HttpServer::new(app_service, host, port, apikey).await?;
+    let server = HttpServer::new(app_service, config.host, config.port, apikey).await?;
     server.run().await
 }
