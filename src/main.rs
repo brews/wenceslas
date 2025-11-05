@@ -153,13 +153,13 @@ async fn post_verify(
 async fn get_user(
     State(appstate): State<Arc<AppState>>,
     Query(params): Query<GetUserRequest>,
-) -> Result<Json<UserProfile>, StatusCode> {
+) -> Result<Json<Vec<UserProfile>>, StatusCode> {
     info!("received request for user profile {:?}", params.email);
     let user_profile_result = core::get_user_profile(&params.email, &appstate.store);
 
     // Digesting these with a match so we can log the outcome.
     match user_profile_result {
-        Ok(r) => Ok(Json(r)),
+        Ok(r) => Ok(Json(vec![r])), // Returned in vector, even if only one user.
         Err(GetUserError::UnknownEmail) => {
             info!("no records found for {:?}", params.email);
             Err(StatusCode::NOT_FOUND)
