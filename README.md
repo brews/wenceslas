@@ -1,5 +1,9 @@
 # wenceslas
 
+[![Cargo Build & Test](https://github.com/brews/wenceslas/actions/workflows/rust.yml/badge.svg)](https://github.com/brews/wenceslas/actions/workflows/rust.yml)
+[![codecov](https://codecov.io/github/brews/wenceslas/graph/badge.svg?token=NVQ9H272M5)](https://codecov.io/github/brews/wenceslas)
+[![container](https://github.com/brews/wenceslas/actions/workflows/container.yml/badge.svg)](https://github.com/brews/wenceslas/actions/workflows/container.yml)
+
 A small web service to verify user emails and passwords against stored Wordpress password hashes.
 
 
