@@ -13,8 +13,9 @@ phpass. These hashes have a `$P$` or `$wp` prefix. The server will fail on
 startup if the CSV file has hashes with unknown prefixes.
 
 The CSV file must be UTF-8 encoded with a header and columns giving `user_email`
-and `user_pass`. Only these columns are loaded into memory. No duplicate user
-emails are allowed and will cause the server to fail on startup.
+and `user_pass`. No duplicate user emails are allowed and will cause the server to fail on startup.
+
+The server will also respond with user profiles to GET requests to `/users` with an email parameter.
 
 > [!WARNING]
 > This application does not have features to securely run alone in a production environment.
@@ -108,6 +109,24 @@ And now requests need to include the key in the header of their requests like
 or the server will reply with "401 Unauthorized" response status.
 
 Again, it's worth noting that using the API key feature does not secure network communication. Simply using the API key feature is not adequate security for running this in a production environment. 
+
+You can also use the `/user` endpoint to get user profiles. For example
+
+```shell
+  curl -X GET "http://localhost:8000/users?email=johndoe%40example.com" \
+    -H "x-apikey: TESTKEY" \
+    -H 'Content-Type: application/json'
+```
+
+is a request for the profile to johndoe@example.com and gets the response
+
+```
+  [{"user_email":"johndoe@example.com","display_name":null,"first_name":null,"last_name":null,"nickname":null}]
+```
+
+The response contains `null`s because these fields are optional, and not columns in the input CSV.
+
+The response is a 404 if no profile is found for the requested email.
 
 ## Installation
 
