@@ -2,17 +2,17 @@ mod core;
 mod storage;
 
 use crate::{
-    core::{UnverifiedPassword, UserEmail, VerifyError},
+    core::{GetUserError, UnverifiedPassword, UserEmail, UserProfile, VerifyError},
     storage::HashStorage,
 };
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use log::warn;
 use serde::Deserialize;
@@ -47,6 +47,11 @@ struct AppState {
 pub enum VerifyDecision {
     Verified,
     Unverified,
+}
+
+#[derive(Deserialize)]
+struct GetUserRequest {
+    email: UserEmail,
 }
 
 impl IntoResponse for VerifyDecision {
@@ -95,6 +100,7 @@ async fn main() -> Result<()> {
     let appstate = Arc::new(AppState { store, apikey });
 
     let app = Router::new()
+        .route("/users", get(get_user))
         .route("/verify", post(post_verify))
         .layer(TimeoutLayer::new(Duration::from_secs(30))) // TODO: Test this does its job.
         .layer(middleware::from_fn_with_state(appstate.clone(), auth))
@@ -142,6 +148,23 @@ async fn post_verify(
 
     info!("decision for {:?} is {decision:?}", request.email);
     Ok(decision)
+}
+
+async fn get_user(
+    State(appstate): State<Arc<AppState>>,
+    Query(params): Query<GetUserRequest>,
+) -> Result<Json<Vec<UserProfile>>, StatusCode> {
+    info!("received request for user profile {:?}", params.email);
+    let user_profile_result = core::get_user_profile(&params.email, &appstate.store);
+
+    // Digesting these with a match so we can log the outcome.
+    match user_profile_result {
+        Ok(r) => Ok(Json(vec![r])), // Returned in vector, even if only one user.
+        Err(GetUserError::UnknownEmail) => {
+            info!("no records found for {:?}", params.email);
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
 }
 
 /// Middleware to screen access to routes based on key in authorization header.

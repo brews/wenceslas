@@ -5,8 +5,26 @@ use std::error::Error;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use hmac::{Hmac, Mac};
 use phpass::PhPass;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha384;
+
+/// The profile part of a user record. Members should be owned by the object used for storage.
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub struct UserProfile {
+    pub user_email: UserEmail,
+    pub display_name: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub nickname: Option<String>,
+}
+
+/// Get user profile from email.
+pub fn get_user_profile(
+    email: &UserEmail,
+    storage: &impl UserProfileReader,
+) -> Result<UserProfile, GetUserError> {
+    storage.read_user_profile(email)
+}
 
 /// Verifies user email and password against stored password hashes.
 ///
@@ -26,6 +44,18 @@ pub fn verify(
         None => return Err(VerifyError::UnknownEmail),
     };
     hash.verify(password)
+}
+
+/// Errors when getting user profile
+#[derive(Debug, PartialEq)]
+pub enum GetUserError {
+    /// No recorded profile for user email.
+    UnknownEmail,
+}
+
+/// Trait for reading a user profile from storage based on user email.
+pub trait UserProfileReader {
+    fn read_user_profile(&self, email: &UserEmail) -> Result<UserProfile, GetUserError>;
 }
 
 /// Errors when verifying credentials.
@@ -78,7 +108,7 @@ pub trait HashReader {
 }
 
 /// A user's email address.
-#[derive(Debug, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub struct UserEmail(String);
 
 impl UserEmail {

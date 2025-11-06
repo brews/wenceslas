@@ -5,16 +5,40 @@ use log::info;
 use serde::{Deserialize, Deserializer, de::Error};
 use std::{collections::HashMap, io::Read};
 
-use crate::core::{HashReader, UserEmail, WordpressHash};
+use crate::core::{
+    GetUserError, HashReader, UserEmail, UserProfile, UserProfileReader, WordpressHash,
+};
 
 /// In-memory storage for password hashes indexed on user email
 pub struct HashStorage {
-    backend: HashMap<UserEmail, WordpressHash>,
+    backend: HashMap<UserEmail, UserRecord>,
 }
 
 impl HashReader for HashStorage {
     fn read_hash(&self, email: &UserEmail) -> Option<&WordpressHash> {
-        self.backend.get(email)
+        let user_record_result = self.backend.get(email);
+        let wordpress_hash = match user_record_result {
+            Some(r) => &r.user_pass,
+            None => return None,
+        };
+        Some(wordpress_hash)
+    }
+}
+
+impl UserProfileReader for HashStorage {
+    fn read_user_profile(&self, email: &UserEmail) -> Result<UserProfile, GetUserError> {
+        let user_record_result = self.backend.get(email);
+        let user_record = match user_record_result {
+            Some(r) => r,
+            None => return Err(GetUserError::UnknownEmail),
+        };
+        Ok(UserProfile {
+            user_email: user_record.user_email.clone(),
+            display_name: user_record.display_name.clone(),
+            first_name: user_record.first_name.clone(),
+            last_name: user_record.last_name.clone(),
+            nickname: user_record.nickname.clone(),
+        })
     }
 }
 
@@ -22,7 +46,7 @@ impl HashReader for HashStorage {
 pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
     let mut reader = csv::Reader::from_reader(reader);
 
-    let mut data_map: HashMap<UserEmail, WordpressHash> = HashMap::new();
+    let mut data_map: HashMap<UserEmail, UserRecord> = HashMap::new();
     let mut n = 0;
 
     for result in reader.deserialize() {
@@ -36,7 +60,7 @@ pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
             )
         }
 
-        data_map.insert(record.user_email, record.user_pass);
+        data_map.insert(record.user_email.clone(), record);
         n += 1;
     }
     info!("loaded {n} records from storage");
@@ -44,11 +68,15 @@ pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
     Ok(HashStorage { backend: data_map })
 }
 
-/// Stored record for login credentials of a single user.
+/// Stored record for profile and login credentials of a single user.
 #[derive(Deserialize)]
 struct UserRecord {
     user_email: UserEmail,
     user_pass: WordpressHash,
+    display_name: Option<String>,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    nickname: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for WordpressHash {
@@ -121,5 +149,44 @@ mod tests {
         let cursor = Cursor::new(file_str);
 
         let _ = load_storage(cursor).unwrap();
+    }
+
+    #[test]
+    fn test_load_storage_full_profile() {
+        // Can load storage file to create a UserProfile is required fields are available in stored data.
+        let file_str = "user_email,user_pass,display_name,first_name,last_name,nickname\nemail@example.com,$P$AFakeHash,DisplayName1,FirstName1,LastName1,Nickname1\nemail2@foobar.com,$wp$AnotherFakeHash,DisplayName2,FirstName2,LastName2,Nickname2";
+        let cursor = Cursor::new(file_str);
+
+        let store = load_storage(cursor).expect("File didn't load");
+
+        assert_eq!(
+            store.read_hash(&UserEmail::new("email@example.com")),
+            Some(&WordpressHash::try_from(String::from("$P$AFakeHash")).unwrap())
+        );
+        assert_eq!(
+            store
+                .read_user_profile(&UserEmail::new("email@example.com"))
+                .unwrap(),
+            UserProfile {
+                user_email: UserEmail::new("email@example.com"),
+                display_name: Some(String::from("DisplayName1")),
+                first_name: Some(String::from("FirstName1")),
+                last_name: Some(String::from("LastName1")),
+                nickname: Some(String::from("Nickname1")),
+            }
+        )
+    }
+
+    #[test]
+    fn test_get_user_profile_errors_on_missing_email() {
+        let file_str = "user_email,user_pass,display_name,first_name,last_name,nickname\nemail@example.com,$P$AFakeHash,DisplayName1,FirstName1,LastName1,Nickname1\n";
+        let cursor = Cursor::new(file_str);
+
+        let store = load_storage(cursor).unwrap();
+
+        assert_eq!(
+            store.read_user_profile(&UserEmail::new("doesntexist@example.com")),
+            Err(GetUserError::UnknownEmail)
+        )
     }
 }
