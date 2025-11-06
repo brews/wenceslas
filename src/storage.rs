@@ -176,4 +176,17 @@ mod tests {
             }
         )
     }
+
+    #[test]
+    fn test_get_user_profile_errors_on_missing_email() {
+        let file_str = "user_email,user_pass,display_name,first_name,last_name,nickname\nemail@example.com,$P$AFakeHash,DisplayName1,FirstName1,LastName1,Nickname1\n";
+        let cursor = Cursor::new(file_str);
+
+        let store = load_storage(cursor).unwrap();
+
+        assert_eq!(
+            store.read_user_profile(&UserEmail::new("doesntexist@example.com")),
+            Err(GetUserError::UnknownEmail)
+        )
+    }
 }
