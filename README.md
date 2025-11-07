@@ -118,7 +118,7 @@ You can also use the `/user` endpoint to get user profiles. For example
 
 ```shell
   curl -X GET "http://localhost:8000/users?email=johndoe%40example.com" \
-    -H "x-apikey: TESTKEY" \
+    -H "x-apikey: ${APIKEY}" \
     -H 'Content-Type: application/json'
 ```
 
