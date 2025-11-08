@@ -18,14 +18,6 @@ pub struct UserProfile {
     pub nickname: Option<String>,
 }
 
-/// Get user profile from email.
-pub fn get_user_profile(
-    email: &UserEmail,
-    storage: &impl UserProfileReader,
-) -> Result<UserProfile, GetUserError> {
-    storage.read_user_profile(email)
-}
-
 /// Verifies user email and password against stored password hashes.
 ///
 /// Returns an empty Ok result when the password is successfully verified against a stored password hash under the same email address.
@@ -54,7 +46,7 @@ pub enum GetUserError {
 }
 
 /// Trait for reading a user profile from storage based on user email.
-pub trait UserProfileReader {
+pub trait UserProfileReader: Send + Sync + Clone + 'static {
     fn read_user_profile(&self, email: &UserEmail) -> Result<UserProfile, GetUserError>;
 }
 
@@ -103,7 +95,7 @@ impl PartialEq for AlgorithmVerifyError {
 }
 
 /// Trait for reading a hashed password from storage based on user email.
-pub trait HashReader {
+pub trait HashReader: Send + Sync + Clone + 'static {
     fn read_hash(&self, email: &UserEmail) -> Option<&WordpressHash>;
 }
 
@@ -124,7 +116,7 @@ impl UserEmail {
 pub struct UnverifiedPassword(String);
 
 impl UnverifiedPassword {
-    fn new(pwd: &str) -> Self {
+    pub fn new(pwd: &str) -> Self {
         Self(String::from(pwd))
     }
 
@@ -137,7 +129,7 @@ impl UnverifiedPassword {
 /// A Wordpress password hash, either a bcrypt variant or from PHPass.
 ///
 /// Use `WordpressHash::verify` to verify `UnverifiedPassword`s.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum WordpressHash {
     /// A Wordpress-flavored bcrypt hash.
     Bcrypt(BcryptWordpressHash),
@@ -170,7 +162,7 @@ impl TryFrom<String> for WordpressHash {
 }
 
 /// A bcrypt-flavored Wordpress password hash.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BcryptWordpressHash(String);
 
 impl BcryptWordpressHash {
@@ -214,7 +206,7 @@ impl BcryptWordpressHash {
 }
 
 /// A Wordpress password hash created with PHPass.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PhpassWordpressHash(String);
 
 impl PhpassWordpressHash {
