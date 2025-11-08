@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::core;
 use crate::{
@@ -30,31 +30,35 @@ pub struct HttpServer {
 
 impl HttpServer {
     pub async fn new(appstate: Arc<AppState>, host: String, port: String) -> anyhow::Result<Self> {
-        let app = Router::new()
-            .route("/users", get(get_user))
-            .route("/verify", post(post_verify))
-            .layer(TimeoutLayer::new(Duration::from_secs(30))) // TODO: Test this does its job.
-            .layer(middleware::from_fn_with_state(appstate.clone(), auth))
-            .layer(TraceLayer::new_for_http())
-            .with_state(appstate);
-        debug!("routes set up");
-
         let server_url = format!("{host}:{port}");
-        info!("listening on {server_url:?}");
         let listener = tokio::net::TcpListener::bind(server_url)
             .await
             .context("Could not bind server to the address and port")?;
-        Ok(Self { app, listener })
+
+        Ok(Self {
+            app: app(appstate),
+            listener,
+        })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        tracing::debug!("listening on {}", self.listener.local_addr().unwrap());
+        info!("listening on {}", self.listener.local_addr().unwrap());
         axum::serve(self.listener, self.app)
             .with_graceful_shutdown(shutdown_signal())
             .await
             .context("error from running server")?;
         Ok(())
     }
+}
+
+fn app(appstate: Arc<AppState>) -> axum::Router {
+    Router::new()
+        .route("/users", get(get_user))
+        .route("/verify", post(post_verify))
+        .layer(TimeoutLayer::new(Duration::from_secs(30))) // TODO: Test this does its job.
+        .layer(middleware::from_fn_with_state(appstate.clone(), auth))
+        .layer(TraceLayer::new_for_http())
+        .with_state(appstate)
 }
 
 async fn post_verify(
