@@ -10,6 +10,7 @@ use crate::core::{
 };
 
 /// In-memory storage for password hashes indexed on user email
+#[derive(Clone)]
 pub struct HashStorage {
     backend: HashMap<UserEmail, UserRecord>,
 }
@@ -69,7 +70,7 @@ pub fn load_storage<R: Read>(reader: R) -> Result<HashStorage> {
 }
 
 /// Stored record for profile and login credentials of a single user.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct UserRecord {
     user_email: UserEmail,
     user_pass: WordpressHash,

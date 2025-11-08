@@ -17,11 +17,8 @@ use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{info, warn};
 
-use crate::core;
-use crate::{
-    core::{GetUserError, UnverifiedPassword, UserEmail, UserProfile, VerifyError},
-    storage::HashStorage,
-};
+use crate::core::{GetUserError, UnverifiedPassword, UserEmail, UserProfile, VerifyError};
+use crate::service::{UserProfileGetter, Verifier};
 
 pub struct HttpServer {
     app: axum::Router,
@@ -29,14 +26,19 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
-    pub async fn new(appstate: Arc<AppState>, host: String, port: String) -> anyhow::Result<Self> {
+    pub async fn new(
+        service: Arc<impl Verifier + UserProfileGetter>,
+        host: String,
+        port: String,
+        apikey: Arc<Option<String>>,
+    ) -> anyhow::Result<Self> {
         let server_url = format!("{host}:{port}");
         let listener = tokio::net::TcpListener::bind(server_url)
             .await
             .context("Could not bind server to the address and port")?;
 
         Ok(Self {
-            app: app(appstate),
+            app: app(service, apikey),
             listener,
         })
     }
@@ -51,22 +53,25 @@ impl HttpServer {
     }
 }
 
-fn app(appstate: Arc<AppState>) -> axum::Router {
+fn app(
+    app_service: Arc<impl Verifier + UserProfileGetter>,
+    apikey: Arc<Option<String>>,
+) -> axum::Router {
     Router::new()
         .route("/users", get(get_user))
         .route("/verify", post(post_verify))
-        .layer(TimeoutLayer::new(Duration::from_secs(30))) // TODO: Test this does its job.
-        .layer(middleware::from_fn_with_state(appstate.clone(), auth))
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        .layer(middleware::from_fn_with_state(apikey, auth))
         .layer(TraceLayer::new_for_http())
-        .with_state(appstate)
+        .with_state(app_service)
 }
 
 async fn post_verify(
-    State(appstate): State<Arc<AppState>>,
+    State(service): State<Arc<impl Verifier>>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<VerifyDecision, StatusCode> {
     info!("received request verify {:?}", request.email);
-    let verify_result = core::verify(&request.email, request.password, &appstate.store);
+    let verify_result = service.verify(&request.email, request.password);
     // Parse verification results, log errors, respond to request with with decision.
     let decision = match verify_result {
         Ok(_) => VerifyDecision::Verified,
@@ -93,11 +98,11 @@ async fn post_verify(
 }
 
 async fn get_user(
-    State(appstate): State<Arc<AppState>>,
+    State(service): State<Arc<impl UserProfileGetter>>,
     Query(params): Query<GetUserRequest>,
 ) -> Result<Json<Vec<UserProfile>>, StatusCode> {
     info!("received request for user profile {:?}", params.email);
-    let user_profile_result = core::get_user_profile(&params.email, &appstate.store);
+    let user_profile_result = service.get_user_profile(&params.email);
 
     // Digesting these with a match so we can log the outcome.
     match user_profile_result {
@@ -111,20 +116,20 @@ async fn get_user(
 
 /// Middleware to screen access to routes based on key in authorization header.
 async fn auth(
-    State(appstate): State<Arc<AppState>>,
+    State(apikey): State<Arc<Option<String>>>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     // Get apikey from app state, return early if None, because then app isn't doing auth.
-    let stored_apikey: &str = match &appstate.apikey {
+    let stored_apikey: &str = match apikey.as_ref() {
         Some(k) => k.as_str(),
         None => {
-            info!("no APIKEY set, skipping auth");
+            info!("no APIKEY set, skipping request auth check");
             return Ok(next.run(req).await);
         }
     };
 
-    // Get api key from header.
+    // Get api key from request header.
     let auth_header = req
         .headers()
         .get("x-apikey")
@@ -135,7 +140,7 @@ async fn auth(
         return Err(StatusCode::UNAUTHORIZED);
     };
 
-    // Check header against valid key.
+    // Check request header against valid key.
     if auth_header == stored_apikey {
         Ok(next.run(req).await)
     } else {
@@ -174,20 +179,15 @@ struct VerifyRequest {
     password: UnverifiedPassword,
 }
 
-pub struct AppState {
-    pub store: HashStorage,
-    pub apikey: Option<String>,
+#[derive(Deserialize)]
+struct GetUserRequest {
+    email: UserEmail,
 }
 
 #[derive(Debug)]
 pub enum VerifyDecision {
     Verified,
     Unverified,
-}
-
-#[derive(Deserialize)]
-struct GetUserRequest {
-    email: UserEmail,
 }
 
 impl IntoResponse for VerifyDecision {
@@ -199,5 +199,147 @@ impl IntoResponse for VerifyDecision {
 
         let body = Json(json!({ "verified": decision }));
         (StatusCode::OK, body).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{body::Body, http};
+    use tower::{Service, ServiceExt};
+
+    use super::*;
+    use crate::storage;
+    use http_body_util::BodyExt; // for `collect`
+    use serde_json::{Value, json};
+    use std::io::Cursor;
+
+    #[tokio::test]
+    async fn test_integration_verify_route() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/verify")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(
+                            &json!({"email": "email2@foobar.com", "password": "Test123Now!"}),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({ "verified": true }));
+    }
+
+    #[tokio::test]
+    async fn test_integration_verify_route_fails_bad_password() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/verify")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(
+                            &json!({"email": "email2@foobar.com", "password": "ThisBetterFail"}),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({ "verified": false }));
+    }
+
+    #[tokio::test]
+    async fn test_integration_verify_route_fails_bad_email() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/verify")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(
+                            &json!({"email": "this@better.fail", "password": "Test123Now!"}),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({ "verified": false }));
+    }
+
+    #[tokio::test]
+    async fn test_integration_users_route() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/users?email=email%40example.com")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            json!([{ "user_email": "email@example.com", "display_name": null, "first_name": null, "last_name": null, "nickname": null}])
+        );
     }
 }
