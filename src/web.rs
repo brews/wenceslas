@@ -247,6 +247,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_integration_verify_route_rejects_bad_apikey() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let apikey = String::from("123abcBadApiKey");
+        let app = app(Arc::new(service), Arc::new(Some(apikey.clone())));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/verify")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .header("x-apikey", "notTheCorrectApiKey")
+                    .body(Body::from(
+                        serde_json::to_vec(
+                            &json!({"email": "email2@foobar.com", "password": "Test123Now!"}),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Double check the body in the response to the unauthorize request is empty and not still giving the solution.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_integration_verify_route_good_apikey() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let apikey = String::from("123abcBadApiKey");
+        let app = app(Arc::new(service), Arc::new(Some(apikey.clone())));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/verify")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .header("x-apikey", apikey)
+                    .body(Body::from(
+                        serde_json::to_vec(
+                            &json!({"email": "email2@foobar.com", "password": "Test123Now!"}),
+                        )
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({ "verified": true }));
+    }
+
+    #[tokio::test]
     async fn test_integration_verify_route_fails_bad_password() {
         let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
         let cursor = Cursor::new(file_str);
@@ -341,5 +411,35 @@ mod tests {
             body,
             json!([{ "user_email": "email@example.com", "display_name": null, "first_name": null, "last_name": null, "nickname": null}])
         );
+    }
+
+    #[tokio::test]
+    async fn test_integration_users_route_rejects_bad_apikey() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let apikey = String::from("123abcBadApiKey");
+        let app = app(Arc::new(service), Arc::new(Some(apikey.clone())));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/users?email=email%40example.com")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .header("x-apikey", "notTheCorrectApiKey")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Double check the body in the response to the unauthorize request is empty and not still sending a user profile.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.is_empty());
     }
 }
