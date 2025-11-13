@@ -166,8 +166,8 @@ to build a container image tagged `wenceslas:dev`.
 Configurations are set through environment variables.
 
 - *CSV_PATH*: Required. Path to CSV file with user email and Wordpress password hashes. Must have columns and header `user_email` and `user_pass`.
-- *HOST*: Required. IPv4 address to listen for requests.
-- *PORT*: Required. Port over which to listen for requests.
+- *HOST*: Required. IPv4 or IPv6 address to listen for requests. E.g. "127.0.0.1" or "::1".
+- *PORT*: Required. Port over which to listen for requests. E.g. "8000".
 - *APIKEY*: Key to check for in request headers under the "x-apikey" field. No auth is used if this is not set.
 - *RUST_LOG*: Logging level.
 
