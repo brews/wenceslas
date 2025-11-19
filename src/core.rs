@@ -5,7 +5,7 @@ use std::error::Error;
 use base64::{Engine, prelude::BASE64_STANDARD};
 use hmac::{Hmac, Mac};
 use phpass::PhPass;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::Sha384;
 
 /// The profile part of a user record. Members should be owned by the object used for storage.
@@ -99,13 +99,27 @@ pub trait HashReader: Send + Sync + Clone + 'static {
     fn read_hash(&self, email: &UserEmail) -> Option<&WordpressHash>;
 }
 
-/// A user's email address.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
+/// A user's email address. Case insensitive.
+///
+/// Use the `UserEmail::new` constructor.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub struct UserEmail(String);
 
 impl UserEmail {
+    /// Constructs a `UserEmail`.
     pub fn new(value: &str) -> Self {
-        Self(String::from(value))
+        Self(String::from(value).to_lowercase())
+    }
+}
+
+// Custom deserializer so converts to lowercase via constructor when deserialize.d
+impl<'de> Deserialize<'de> for UserEmail {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?; // Deserialize the input as a String
+        Ok(Self::new(&s))
     }
 }
 
@@ -390,5 +404,12 @@ mod tests {
             hash.verify(password).is_ok(),
             "Failed to verify Wordpress-variant bcrypt hashed password"
         )
+    }
+
+    #[test]
+    fn test_useremail_new_caseinsensitive() {
+        let actual = UserEmail::new("EmAiL@eXaMpLe.CoM");
+        let expected = UserEmail::new("email@example.com");
+        assert_eq!(actual, expected);
     }
 }

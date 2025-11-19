@@ -98,7 +98,7 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn test_load_storage_basic() {
+    fn test_load_storage_read_hash_basic() {
         let file_str = "user_email,user_pass\nemail@example.com,$P$AFakeHash\nemail2@foobar.com,$wp$AnotherFakeHash";
         let cursor = Cursor::new(file_str);
 
@@ -189,5 +189,18 @@ mod tests {
             store.read_user_profile(&UserEmail::new("doesntexist@example.com")),
             Err(GetUserError::UnknownEmail)
         )
+    }
+
+    #[test]
+    fn test_load_storage_read_hash_email_case_insensitive() {
+        let file_str = "user_email,user_pass\nEmAiL@example.com,$P$AFakeHash\nemail2@foobar.com,$wp$AnotherFakeHash";
+        let cursor = Cursor::new(file_str);
+
+        let store = load_storage(cursor).expect("File didn't load");
+
+        assert_eq!(
+            store.read_hash(&UserEmail::new("email@example.com")),
+            Some(&WordpressHash::try_from(String::from("$P$AFakeHash")).unwrap())
+        );
     }
 }
