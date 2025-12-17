@@ -409,7 +409,7 @@ mod tests {
         let body: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             body,
-            json!([{ "user_email": "email@example.com", "display_name": null, "first_name": null, "last_name": null, "nickname": null}])
+            json!([{ "user_email": "email@example.com", "display_name": null, "first_name": null, "last_name": null, "nickname": null, "organization": null}])
         );
     }
 

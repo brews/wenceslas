@@ -16,6 +16,7 @@ pub struct UserProfile {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub nickname: Option<String>,
+    pub organization: Option<String>,
 }
 
 /// Verifies user email and password against stored password hashes.

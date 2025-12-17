@@ -125,7 +125,7 @@ You can also use the `/user` endpoint to get user profiles. For example
 is a request for the profile to johndoe@example.com and gets the response
 
 ```
-  [{"user_email":"johndoe@example.com","display_name":null,"first_name":null,"last_name":null,"nickname":null}]
+  [{"user_email":"johndoe@example.com","display_name":null,"first_name":null,"last_name":null,"nickname":null,"organization":null}]
 ```
 
 The response contains `null`s because these fields are optional, and not columns in the input CSV.
