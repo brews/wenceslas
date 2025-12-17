@@ -50,6 +50,7 @@ impl Default for SimpleTestService {
             first_name: None,
             last_name: None,
             nickname: None,
+            organization: None,
         };
         Self(test_user_profile)
     }

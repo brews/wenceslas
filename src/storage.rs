@@ -39,6 +39,7 @@ impl UserProfileReader for HashStorage {
             first_name: user_record.first_name.clone(),
             last_name: user_record.last_name.clone(),
             nickname: user_record.nickname.clone(),
+            organization: user_record.organization.clone(),
         })
     }
 }
@@ -78,6 +79,7 @@ struct UserRecord {
     first_name: Option<String>,
     last_name: Option<String>,
     nickname: Option<String>,
+    organization: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for WordpressHash {
@@ -155,7 +157,7 @@ mod tests {
     #[test]
     fn test_load_storage_full_profile() {
         // Can load storage file to create a UserProfile is required fields are available in stored data.
-        let file_str = "user_email,user_pass,display_name,first_name,last_name,nickname\nemail@example.com,$P$AFakeHash,DisplayName1,FirstName1,LastName1,Nickname1\nemail2@foobar.com,$wp$AnotherFakeHash,DisplayName2,FirstName2,LastName2,Nickname2";
+        let file_str = "user_email,user_pass,display_name,first_name,last_name,nickname,organization\nemail@example.com,$P$AFakeHash,DisplayName1,FirstName1,LastName1,Nickname1,Org1\nemail2@foobar.com,$wp$AnotherFakeHash,DisplayName2,FirstName2,LastName2,Nickname2,";
         let cursor = Cursor::new(file_str);
 
         let store = load_storage(cursor).expect("File didn't load");
@@ -174,6 +176,7 @@ mod tests {
                 first_name: Some(String::from("FirstName1")),
                 last_name: Some(String::from("LastName1")),
                 nickname: Some(String::from("Nickname1")),
+                organization: Some(String::from("Org1")),
             }
         )
     }
