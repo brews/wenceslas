@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- README improvements.
 
 
 ## [1.0.0] - 2026-03-20
 
 - Initial release.
 
-[Unreleased]: 
 
 [Unreleased]: https://github.com/brews/wenceslas/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/brews/wenceslas/releases/tag/v1.0.0

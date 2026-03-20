@@ -43,14 +43,15 @@ Generate a CSV file with user email addresses and hashed passwords in an example
 Now start the server. Here, we're using the container.
 
 ```shell
-  docker run --rm  -p 8000:8000 \
+  docker run --rm  -p 127.0.0.1:8000:8000 \
     -v "${EXAMPLE_DIR}:/data:ro" \
     -e CSV_PATH="/data/${DB_FILE}" \
     -e HOST="0.0.0.0" \
     -e PORT="8000" \
-    -e RUST_LOG="TRACE" \
-    wenceslas:dev
+    ghcr.io/brews/wenceslas:latest
 ```
+> [!TIP]
+> This example is using the `latest` tag for demonstration. In a production environment best practice is to use a tag or hash for a specific released version, such as `1.0.0`. Tagged images are available [here](https://github.com/brews/wenceslas/pkgs/container/wenceslas).  
 
 Send requests to the server like
 
@@ -91,14 +92,13 @@ You can set an optional API key when the server starts. The server will only all
 And pass the key to the server on startup like
 
 ```shell
-  docker run --rm  -p 8000:8000 \
+  docker run --rm  -p 127.0.0.1:8000:8000 \
     -v "${EXAMPLE_DIR}:/data:ro" \
     -e CSV_PATH="/data/${DB_FILE}" \
     -e HOST="0.0.0.0" \
     -e PORT="8000" \
-    -e RUST_LOG="TRACE" \
     -e APIKEY="${APIKEY}" \
-    wenceslas:dev
+    ghcr.io/brews/wenceslas:latest
 ```
 
 And now requests need to include the key in the header of their requests like
@@ -169,11 +169,11 @@ Configurations are set through environment variables.
 - *HOST*: Required. IPv4 or IPv6 address to listen for requests. E.g. "127.0.0.1" or "::1".
 - *PORT*: Required. Port over which to listen for requests. E.g. "8000".
 - *APIKEY*: Key to check for in request headers under the "x-apikey" field. No auth is used if this is not set.
-- *RUST_LOG*: Logging level.
+- *RUST_LOG*: Logging level. E.g. "TRACE".
 
 ## Support
 
-wenceslas releases use semantic versioning. Best effort is made to note breaking changes to the application and its web API as documented. This does not include breaking changes the application's Rust API.
+wenceslas releases use semantic versioning. Best effort is made to note breaking changes to the application and its web API as documented. This does not include breaking changes to the application's Rust API.
 
 wenceslas is open-source software made available under the terms of either the MIT License or the Apache License 2.0, at your option.
 
