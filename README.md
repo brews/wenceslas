@@ -173,5 +173,7 @@ Configurations are set through environment variables.
 
 ## Support
 
+wenceslas releases use semantic versioning. Best effort is made to note breaking changes to the application and its web API as documented. This does not include breaking changes the application's Rust API.
+
 wenceslas is open-source software made available under the terms of either the MIT License or the Apache License 2.0, at your option.
 
