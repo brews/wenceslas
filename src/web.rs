@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
@@ -60,6 +60,7 @@ fn app(
     Router::new()
         .route("/users", get(get_user))
         .route("/verify", post(post_verify))
+        .route("/email-query", post(post_emailquery))
         .layer(TimeoutLayer::new(Duration::from_secs(30)))
         .layer(middleware::from_fn_with_state(apikey, auth))
         .layer(TraceLayer::new_for_http())
@@ -110,6 +111,26 @@ async fn get_user(
         Err(GetUserError::UnknownEmail) => {
             info!("no records found for {:?}", params.email);
             Err(StatusCode::NOT_FOUND)
+        }
+    }
+}
+
+async fn post_emailquery(
+    State(service): State<Arc<impl UserProfileGetter>>,
+    Json(request): Json<PostEmailQueryRequest>,
+) -> Result<Json<PostEmailQueryResponse>, StatusCode> {
+    info!("received request for user profile {:?}", request.email);
+    let user_profile_result = service.get_user_profile(&request.email);
+
+    match user_profile_result {
+        Ok(r) => Ok(Json(PostEmailQueryResponse { users: vec![r] })), // Returned in vector, even if only one user.
+        Err(GetUserError::UnknownEmail) => {
+            info!("no records found for {:?}", request.email);
+            let empty_user_vec: Vec<UserProfile> = Vec::new();
+            // No matching users means empty "users" vector returned in response.
+            Ok(Json(PostEmailQueryResponse {
+                users: empty_user_vec,
+            }))
         }
     }
 }
@@ -171,6 +192,16 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+}
+
+#[derive(Deserialize)]
+struct PostEmailQueryRequest {
+    email: UserEmail,
+}
+
+#[derive(Serialize)]
+struct PostEmailQueryResponse {
+    users: Vec<UserProfile>,
 }
 
 #[derive(Deserialize)]
@@ -431,6 +462,101 @@ mod tests {
                     .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
                     .header("x-apikey", "notTheCorrectApiKey")
                     .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        // Double check the body in the response to the unauthorize request is empty and not still sending a user profile.
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_integration_post_emailquery_route() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/email-query")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({"email": "email@example.com"})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            json!({"users": [{ "user_email": "email@example.com", "display_name": null, "first_name": null, "last_name": null, "nickname": null, "organization": null}]})
+        );
+    }
+
+    #[tokio::test]
+    async fn test_integration_post_emailquery_route_empty_array_on_no_match() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let app = app(Arc::new(service), Arc::new(None));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/email-query")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({"email": "foobar@nomatch.com"})).unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body, json!({"users": []}));
+    }
+
+    #[tokio::test]
+    async fn test_integration_post_emailquery_route_rejects_bad_apikey() {
+        let file_str = "user_email,user_pass\nemail@example.com,$P$BsSozX7pxy0bajB//ff34WOg4vN9OI/\nemail2@foobar.com,$wp$2y$10$gN3SQdbNc/cVlK7DylUiVumiuujud7lR0h5J4M2ZsNRMYOFbED16q";
+        let cursor = Cursor::new(file_str);
+        let store = storage::load_storage(cursor).unwrap();
+        let service = crate::service::Service::new(store);
+
+        let apikey = String::from("123abcBadApiKey");
+        let app = app(Arc::new(service), Arc::new(Some(apikey.clone())));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/email-query")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .header("x-apikey", "notTheCorrectApiKey")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({"email": "email@example.com"})).unwrap(),
+                    ))
                     .unwrap(),
             )
             .await

@@ -132,6 +132,38 @@ The response contains `null`s because these fields are optional, and not columns
 
 The response is a 404 if no profile is found for the requested email.
 
+Similar information can be found with
+
+```shell
+  curl -X POST "http://localhost:8000/email-query" \
+    -H "x-apikey: ${APIKEY}" \
+    -H 'Content-Type: application/json'
+    --data-raw '{"email": "johndoe@example.com"}'
+```
+
+which gets the response
+
+```
+  {"users": [{"user_email":"johndoe@example.com","display_name":null,"first_name":null,"last_name":null,"nickname":null,"organization":null}]}
+```
+
+The `"users"` array is emtpy if there is no match. For example,
+
+```shell
+  curl -X POST "http://localhost:8000/email-query" \
+    -H "x-apikey: ${APIKEY}" \
+    -H 'Content-Type: application/json'
+    --data-raw '{"email": "no@match.com"}'
+```
+
+gets the response
+
+```
+  {"users": []}
+```
+
+The benefit of POSTing to the `/email-query` endpoint over GETing the `/users` endpoint is that user emails in the POST request are not part of the URL, thus, less likely to be logged by intermediate systems, respecting user privacy.
+
 ## Installation
 
 wenceslas is typically run from prebuilt container images.
